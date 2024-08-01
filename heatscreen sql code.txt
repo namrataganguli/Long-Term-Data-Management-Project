@@ -1,0 +1,61 @@
+create database heatscreen;
+use heatscreen;
+
+CREATE TABLE MES_Parameter (
+ParameterID INT AUTO_INCREMENT PRIMARY KEY,
+ParameterName VARCHAR(255),
+RelatedTo VARCHAR(255),
+RelatedAggregate VARCHAR(255),
+ColumnType VARCHAR(255),
+Nullable VARCHAR(255)
+);
+
+
+CREATE TABLE MES_Heat (
+HeatID INT AUTO_INCREMENT PRIMARY KEY,
+HeatName VARCHAR(255),
+TreatmentCounter VARCHAR(255),
+CreationTime TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+InsertionTime TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+UpdateTime TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE MES_Heat_Details (
+ID INT,
+HeatName VARCHAR(255),
+ParameterID INT,
+ParameterName VARCHAR(255),
+ParameterValues VARCHAR(255),
+PRIMARY KEY (ID, HeatName, ParameterID),
+FOREIGN KEY (ID) REFERENCES MES_Heat(HeatID)
+);
+
+CREATE TABLE MS_Treatment (
+TreatmentID INT AUTO_INCREMENT PRIMARY KEY,
+HeatName VARCHAR(255),
+RelatedAggregate VARCHAR(255),
+Stationno VARCHAR(255),
+Counter VARCHAR(255),
+StartTime VARCHAR(255),
+EndTime VARCHAR(255)
+);
+
+CREATE TABLE MS_Treatment_Details (
+TreatmentID INT,
+ParameterID INT,
+ParameterName VARCHAR(255),
+Parametervalues VARCHAR(255),
+PRIMARY KEY (TreatmentID, ParameterID, ParameterName),
+FOREIGN KEY (TreatmentID) REFERENCES MS_Treatment(TreatmentID)
+);
+
+
+
+SELECT * FROM MES_Parameter;
+SELECT * FROM MES_Heat;
+SELECT * FROM MES_Heat_Details;
+SELECT * FROM MS_Treatment;
+SELECT * FROM MS_Treatment_Details;
+SHOW TABLES;
+
+

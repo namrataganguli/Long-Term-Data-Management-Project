@@ -1,0 +1,1392 @@
+/*
+ * Click nbfs://nbhost/SystemFileSystem/Templates/Licenses/license-default.txt to change this license
+ * Click nbfs://nbhost/SystemFileSystem/Templates/GUIForms/JFrame.java to edit this template
+ */
+package heatscreen;
+
+import java.awt.*;
+import java.sql.*;
+import java.util.HashMap;
+import java.util.Map;
+import javax.swing.*;
+import java.util.Properties;
+import static javax.management.Query.value;
+import java.text.SimpleDateFormat;
+import javax.swing.JSpinner;
+import javax.swing.SpinnerModel;
+import javax.swing.SpinnerDateModel;
+import java.util.Date;
+import com.toedter.calendar.JDateChooser;
+import java.awt.event.ActionEvent;
+import java.awt.event.ActionListener;
+import java.text.ParseException;
+import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Calendar;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.Set;
+import javax.swing.border.TitledBorder;
+
+
+/**
+ *
+ * @author NAMRATA
+ */
+public class HeatScreen extends javax.swing.JFrame {
+    
+    private Connection connection;
+    private Properties properties;
+
+
+    /**
+     * Creates new form HeatScreen
+     */
+    public HeatScreen() {
+        initComponents();
+        establishDatabaseConnection();
+    }
+    
+    
+     private void establishDatabaseConnection() {
+        try {
+            // Load the MySQL JDBC driver
+            Class.forName("com.mysql.cj.jdbc.Driver");
+            // Establish the connection
+            connection = DriverManager.getConnection("jdbc:mysql://localhost:3306/heatscreen", "root", "avinams");
+            System.out.println("Successfully connected to the database.");
+        } catch (ClassNotFoundException e) {
+            System.err.println("MySQL JDBC Driver not found.");
+            e.printStackTrace();
+        } catch (SQLException e) {
+            System.err.println("Failed to connect to the database. Error: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+     
+     
+     private void openParameterSelectionScreen(String selectedOption) {
+        JFrame parameterFrame = new JFrame("Select Parameters for " + selectedOption);
+        parameterFrame.setSize(400, 500);
+        JPanel panel = new JPanel();
+        panel.setLayout(new GridLayout(0, 1));
+
+        JPanel heatNamePanel = new JPanel();
+        JLabel heatNameLabel = new JLabel("Heat Name:");
+        JTextField heatNameField = new JTextField(15);
+        heatNamePanel.add(heatNameLabel);
+        heatNamePanel.add(heatNameField);
+        panel.add(heatNamePanel);
+
+        Map<String, JPanel> mainPanelMap = new HashMap<>();
+        Map<String, Map<String, JCheckBox>> checkBoxMap = new HashMap<>();
+        Map<String, JPanel> subCheckBoxPanelMap = new HashMap<>();
+        final JCheckBox[] basicCheckBox = {null}; // Use array to ensure it's accessible inside inner classes
+
+        try {
+            String query = "SELECT RelatedAggregate, ParameterName FROM MES_Parameter WHERE RelatedTo = ?";
+            PreparedStatement stmt = connection.prepareStatement(query);
+            stmt.setString(1, selectedOption);
+            ResultSet rs = stmt.executeQuery();
+
+            while (rs.next()) {
+                String relatedAggregate = rs.getString("RelatedAggregate");
+                String parameterName = rs.getString("ParameterName");
+
+                if (relatedAggregate == null || relatedAggregate.isEmpty()) {
+                    relatedAggregate = "Basic";
+                }
+
+                JPanel mainPanel = mainPanelMap.get(relatedAggregate);
+                if (mainPanel == null) {
+                    mainPanel = new JPanel();
+                    mainPanel.setLayout(new GridLayout(0, 1));
+
+                    JCheckBox mainCheckBox = new JCheckBox(relatedAggregate);
+                    if (relatedAggregate.equals("Basic")) {
+                        basicCheckBox[0] = mainCheckBox; // Store reference to the Basic checkbox
+                        // Do not auto-select Basic checkbox
+                    }
+
+                    mainPanel.add(mainCheckBox);
+                    panel.add(mainPanel);
+                    mainPanelMap.put(relatedAggregate, mainPanel);
+                    checkBoxMap.put(relatedAggregate, new HashMap<>());
+
+                    JPanel subCheckBoxPanel = new JPanel(new GridLayout(0, 1));
+                    subCheckBoxPanel.setVisible(false);
+                    panel.add(subCheckBoxPanel);
+                    subCheckBoxPanelMap.put(relatedAggregate, subCheckBoxPanel);
+
+                    final String currentRelatedAggregate = relatedAggregate;
+                    mainCheckBox.addActionListener(e -> {
+                        subCheckBoxPanel.setVisible(mainCheckBox.isSelected());
+                        if (!mainCheckBox.isSelected()) {
+                            for (JCheckBox subCheckBox : checkBoxMap.get(currentRelatedAggregate).values()) {
+                                subCheckBox.setSelected(false);
+                            }
+                        }
+                        parameterFrame.revalidate();
+                        parameterFrame.repaint();
+                    });
+                }
+
+                JPanel subCheckBoxPanel = subCheckBoxPanelMap.get(relatedAggregate);
+                JCheckBox subCheckBox = new JCheckBox(parameterName);
+                subCheckBoxPanel.add(subCheckBox);
+                checkBoxMap.get(relatedAggregate).put(parameterName, subCheckBox);
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+
+        JButton confirmButton = new JButton("CONFIRM");
+        confirmButton.addActionListener(e -> {
+    Map<String, Map<String, JCheckBox>> selectedCheckBoxes = new HashMap<>();
+    boolean validSelection = true;
+
+    // Ensure "Basic" checkbox is selected and has "SteelGrade" selected
+    if (basicCheckBox[0] == null || !basicCheckBox[0].isSelected()) {
+        validSelection = false;
+        JOptionPane.showMessageDialog(parameterFrame,
+                "Please ensure the Basic checkbox is selected.",
+                "Missing Selection", JOptionPane.WARNING_MESSAGE);
+    } else if (heatNameField.getText().isEmpty()) {
+        validSelection = false;
+        JOptionPane.showMessageDialog(parameterFrame,
+                "Please enter 'Heat Name' before proceeding.",
+                "Missing Heat Name", JOptionPane.WARNING_MESSAGE);
+    } else {
+        boolean mainCheckboxSelected = false;
+        boolean steelGradeSelected = false; // Flag for SteelGrade checkbox
+        boolean startTimeSelected = false; // Flag for StartTime checkbox
+        boolean endTimeSelected = false; // Flag for EndTime checkbox
+        boolean stationNoSelected = false; // Flag for StationNo checkbox
+
+        for (String heading : checkBoxMap.keySet()) {
+            Map<String, JCheckBox> subCheckBoxMap = checkBoxMap.get(heading);
+            Map<String, JCheckBox> selectedSubCheckBoxMap = new HashMap<>();
+
+            for (String param : subCheckBoxMap.keySet()) {
+                JCheckBox checkBox = subCheckBoxMap.get(param);
+                if (checkBox.isSelected()) {
+                    selectedSubCheckBoxMap.put(param, checkBox);
+                    if (param.equals("StartTime")) startTimeSelected = true;
+                    if (param.equals("EndTime")) endTimeSelected = true;
+                    if (param.equals("StationNo")) stationNoSelected = true;
+                    if (heading.equals("Basic") && param.equals("SteelGrade")) steelGradeSelected = true;
+                }
+            }
+
+            if (!selectedSubCheckBoxMap.isEmpty()) {
+                selectedCheckBoxes.put(heading, selectedSubCheckBoxMap);
+            }
+
+            JCheckBox mainCheckBox = (JCheckBox) mainPanelMap.get(heading).getComponent(0);
+            if (!heading.equals("Basic") && mainCheckBox.isSelected()) {
+                mainCheckboxSelected = true;
+                if (!startTimeSelected || !endTimeSelected || !stationNoSelected) {
+                    validSelection = false;
+                    JOptionPane.showMessageDialog(parameterFrame,
+                            "Please select StartTime, EndTime, and StationNo for " + heading,
+                            "Missing Selections", JOptionPane.WARNING_MESSAGE);
+                    break;
+                }
+            }
+        }
+
+        if (!mainCheckboxSelected) {
+            validSelection = false;
+            JOptionPane.showMessageDialog(parameterFrame,
+                    "Please select one or more main checkboxes along with Basic.",
+                    "Missing Selections", JOptionPane.WARNING_MESSAGE);
+        }
+
+        // Check if SteelGrade is selected for Basic
+        if (basicCheckBox[0] != null && basicCheckBox[0].isSelected() && !steelGradeSelected) {
+            validSelection = false;
+            JOptionPane.showMessageDialog(parameterFrame,
+                    "Please select the mandatory SteelGrade under Basic.",
+                    "Missing SteelGrade", JOptionPane.WARNING_MESSAGE);
+        }
+    }
+
+    if (validSelection) {
+        String heatName = heatNameField.getText();
+        openInputScreen(selectedCheckBoxes, heatName);
+    }
+});
+
+
+        panel.add(confirmButton);
+
+        JScrollPane scrollPane = new JScrollPane(panel);
+        parameterFrame.add(scrollPane);
+        parameterFrame.setVisible(true);
+    }
+
+    private void openInputScreen(Map<String, Map<String, JCheckBox>> selectedCheckBoxes, String heatName) {
+    JFrame inputFrame = new JFrame("Input Values");
+    inputFrame.setSize(400, 500);
+    JPanel inputPanel = new JPanel();
+    inputPanel.setLayout(new GridBagLayout());
+    GridBagConstraints gbc = new GridBagConstraints();
+    gbc.insets = new Insets(5, 5, 5, 5); // Padding between components
+
+    // Heat Name
+    gbc.gridx = 0;
+    gbc.gridy = 0;
+    gbc.anchor = GridBagConstraints.WEST;
+    JLabel heatNameLabel = new JLabel("Heat Name:");
+    inputPanel.add(heatNameLabel, gbc);
+
+    gbc.gridx = 1;
+    gbc.gridy = 0;
+    gbc.anchor = GridBagConstraints.WEST;
+    JLabel heatNameValue = new JLabel(heatName);
+    inputPanel.add(heatNameValue, gbc);
+
+    // Input fields for parameters
+    gbc.anchor = GridBagConstraints.WEST;
+    gbc.gridx = 0;
+    int row = 1;
+
+    Map<String, JComponent> inputFields = new HashMap<>();
+
+    for (String heading : selectedCheckBoxes.keySet()) {
+        Map<String, JCheckBox> subCheckBoxMap = selectedCheckBoxes.get(heading);
+        for (String parameterName : subCheckBoxMap.keySet()) {
+            JLabel label = new JLabel(heading + "." + parameterName + ":");
+            gbc.gridy = row;
+            inputPanel.add(label, gbc);
+
+            gbc.gridx = 1;
+            gbc.gridwidth = 2;
+            JComponent inputField;
+
+            if (parameterName.equals("StartTime") || parameterName.equals("EndTime")) {
+                inputField = new JSpinner(new SpinnerDateModel());
+                JSpinner.DateEditor dateEditor = new JSpinner.DateEditor((JSpinner) inputField, "yyyy-MM-dd HH:mm:ss");
+                ((JSpinner) inputField).setEditor(dateEditor);
+            } else {
+                inputField = new JTextField(15);
+            }
+
+            inputPanel.add(inputField, gbc);
+            inputFields.put(heading + "." + parameterName, inputField);
+            gbc.gridx = 0;
+            gbc.gridwidth = 1;
+            row++;
+        }
+    }
+
+    // Insert button
+    gbc.gridx = 0;
+    gbc.gridy = row;
+    gbc.gridwidth = 2;
+    gbc.anchor = GridBagConstraints.CENTER;
+    JButton submitButton = new JButton("INSERT");
+    submitButton.addActionListener(e -> {
+        try {
+            insertDataIntoDatabase(heatName, inputFields, selectedCheckBoxes);
+        } catch (SQLException ex) {
+            ex.printStackTrace();
+            JOptionPane.showMessageDialog(inputFrame, "Error inserting data: " + ex.getMessage(),
+                    "Database Error", JOptionPane.ERROR_MESSAGE);
+        }
+    });
+    inputPanel.add(submitButton, gbc);
+
+    JScrollPane scrollPane = new JScrollPane(inputPanel);
+    inputFrame.add(scrollPane);
+    inputFrame.setVisible(true);
+}
+
+
+private void insertDataIntoDatabase(String heatName, Map<String, JComponent> inputFields, Map<String, Map<String, JCheckBox>> selectedCheckBoxes) throws SQLException {
+    connection.setAutoCommit(false);
+
+    try {
+        // Check for existing SteelGrade
+        String existingSteelGrade = getExistingSteelGrade(heatName);
+        String newSteelGrade = null;
+
+        // Find the new SteelGrade value from input fields
+        for (String key : inputFields.keySet()) {
+            if (key.endsWith(".SteelGrade")) {
+                JComponent component = inputFields.get(key);
+                if (component instanceof JTextField) {
+                    newSteelGrade = ((JTextField) component).getText();
+                    break;
+                }
+            }
+        }
+
+        // If SteelGrade exists and is different from the new one, throw an error
+        if (existingSteelGrade != null && newSteelGrade != null && !existingSteelGrade.equals(newSteelGrade)) {
+            throw new SQLException("A different SteelGrade already exists for this HeatName. Only one SteelGrade per HeatName is allowed.");
+        }
+
+        // Get the current maximum TreatmentCounter for the given HeatName
+        String treatmentCounterQuery = "SELECT MAX(TreatmentCounter) FROM MES_Heat WHERE HeatName = ?";
+        PreparedStatement treatmentCounterStmt = connection.prepareStatement(treatmentCounterQuery);
+        treatmentCounterStmt.setString(1, heatName);
+        ResultSet treatmentCounterRs = treatmentCounterStmt.executeQuery();
+        int treatmentCounter = 1; // Default to 1 if no records found
+
+        if (treatmentCounterRs.next()) {
+            int maxTreatmentCounter = treatmentCounterRs.getInt(1);
+            if (!treatmentCounterRs.wasNull()) {
+                treatmentCounter = maxTreatmentCounter + 1;
+            }
+        }
+
+        // Get the StartTime and EndTime from input fields
+        String startTime = null;
+        String endTime = null;
+        SimpleDateFormat dateTimeFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+
+        for (String key : inputFields.keySet()) {
+            String[] parts = key.split("\\.");
+            if (parts.length > 1) {
+                JComponent component = inputFields.get(key);
+                if (component instanceof JSpinner) {
+                    Object value = ((JSpinner) component).getValue();
+                    if (value instanceof Date) {
+                        Date date = (Date) value;
+                        String formattedDate = dateTimeFormat.format(date);
+                        if ("StartTime".equals(parts[1])) {
+                            startTime = formattedDate;
+                        } else if ("EndTime".equals(parts[1])) {
+                            endTime = formattedDate;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Fetch the existing CreationTime if the HeatName already exists
+        String creationTime = null;
+if (treatmentCounter > 1) {
+    String fetchCreationTimeSQL = "SELECT CreationTime FROM MES_Heat WHERE HeatName = ? ORDER BY TreatmentCounter ASC LIMIT 1";
+    PreparedStatement fetchCreationTimeStmt = connection.prepareStatement(fetchCreationTimeSQL);
+    fetchCreationTimeStmt.setString(1, heatName);
+    ResultSet creationTimeRs = fetchCreationTimeStmt.executeQuery();
+    if (creationTimeRs.next()) {
+        creationTime = creationTimeRs.getString("CreationTime");
+    }
+} else {
+    creationTime = startTime; // For the first entry, set CreationTime to StartTime
+}
+
+// Ensure creationTime is not null
+if (creationTime == null) {
+    throw new SQLException("CreationTime should not be null.");
+}
+
+        // Delete old entries in MES_Heat_Details for the HeatName
+        String deleteOldEntriesInDetailsSQL = "DELETE FROM MES_Heat_Details WHERE HeatName = ?";
+        PreparedStatement deleteOldEntriesInDetailsStmt = connection.prepareStatement(deleteOldEntriesInDetailsSQL);
+        deleteOldEntriesInDetailsStmt.setString(1, heatName);
+        deleteOldEntriesInDetailsStmt.executeUpdate();
+
+        // Delete old entries in MES_Heat for the HeatName
+        String deleteOldEntriesSQL = "DELETE FROM MES_Heat WHERE HeatName = ?";
+        PreparedStatement deleteOldEntriesStmt = connection.prepareStatement(deleteOldEntriesSQL);
+        deleteOldEntriesStmt.setString(1, heatName);
+        deleteOldEntriesStmt.executeUpdate();
+
+        // Insert into MES_Heat
+        String insertHeatSQL = "INSERT INTO MES_Heat (HeatName, TreatmentCounter, CreationTime, UpdateTime) VALUES (?, ?, ?, ?)";
+PreparedStatement pstmtHeat = connection.prepareStatement(insertHeatSQL, Statement.RETURN_GENERATED_KEYS);
+pstmtHeat.setString(1, heatName);
+pstmtHeat.setInt(2, treatmentCounter);
+pstmtHeat.setString(3, creationTime);
+pstmtHeat.setString(4, startTime);
+pstmtHeat.executeUpdate();
+
+        ResultSet generatedKeys = pstmtHeat.getGeneratedKeys();
+        int heatID = -1; // Initialize heatID
+        if (generatedKeys.next()) {
+            heatID = generatedKeys.getInt(1); // Retrieve the generated heatID
+        } else {
+            throw new SQLException("Failed to retrieve heatID.");
+        }
+
+        // Insert into MS_Treatment and fetch TreatmentID
+        Map<String, Integer> treatmentIDMap = new HashMap<>();
+
+        for (String key : inputFields.keySet()) {
+            String[] parts = key.split("\\.");
+            String parameterName = parts[1];
+            JComponent component = inputFields.get(key);
+            String value = "";
+
+            if (component instanceof JTextField) {
+                value = ((JTextField) component).getText();
+            } else if (component instanceof JSpinner) {
+                Object spinnerValue = ((JSpinner) component).getValue();
+                if (spinnerValue instanceof Date) {
+                    Date date = (Date) spinnerValue;
+                    value = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(date);
+                }
+            }
+
+            String relatedAggregate = parts[0];
+
+            Integer treatmentID = treatmentIDMap.get(heatName);
+
+            if (treatmentID == null) {
+                String insertTreatmentSQL = "INSERT INTO MS_Treatment (HeatName, RelatedAggregate, StationNo, Counter, StartTime, EndTime, Remarks) VALUES (?, ?, ?, ?, ?, ?, ?)";
+                PreparedStatement pstmtTreatment = connection.prepareStatement(insertTreatmentSQL, Statement.RETURN_GENERATED_KEYS);
+                pstmtTreatment.setString(1, heatName);
+                pstmtTreatment.setString(2, relatedAggregate);
+                String stationNo = getStationNoForRelatedAggregate(inputFields, relatedAggregate);
+                pstmtTreatment.setString(3, stationNo);
+                pstmtTreatment.setInt(4, treatmentCounter);
+
+                String startTimeInput = getTimestampForCheckbox(selectedCheckBoxes, inputFields, relatedAggregate, "StartTime");
+                String endTimeInput = getTimestampForCheckbox(selectedCheckBoxes, inputFields, relatedAggregate, "EndTime");
+
+                pstmtTreatment.setString(5, startTimeInput);
+                pstmtTreatment.setString(6, endTimeInput);
+                pstmtTreatment.setString(7, null);
+                pstmtTreatment.executeUpdate();
+                ResultSet treatmentKeys = pstmtTreatment.getGeneratedKeys();
+                if (treatmentKeys.next()) {
+                    treatmentID = treatmentKeys.getInt(1);
+                    treatmentIDMap.put(heatName, treatmentID);
+                }
+            }
+
+            // Insert into MS_Treatment_Details
+            String insertTreatmentDetailsSQL = "INSERT INTO MS_Treatment_Details (TreatmentID, ParameterID, ParameterName, Parametervalues) VALUES (?, ?, ?, ?)";
+            PreparedStatement pstmtTreatmentDetails = connection.prepareStatement(insertTreatmentDetailsSQL);
+            pstmtTreatmentDetails.setInt(1, treatmentID);
+            pstmtTreatmentDetails.setInt(2, getParameterID(parameterName));
+            pstmtTreatmentDetails.setString(3, parameterName);
+            pstmtTreatmentDetails.setString(4, value);
+            pstmtTreatmentDetails.executeUpdate();
+        }
+
+        // Insert into MES_Heat_Details for the latest treatment
+        for (String key : inputFields.keySet()) {
+            String[] parts = key.split("\\.");
+            String parameterName = parts[1];
+            JComponent component = inputFields.get(key);
+            String value = "";
+
+            if (component instanceof JTextField) {
+                value = ((JTextField) component).getText();
+            } else if (component instanceof JSpinner) {
+                Object spinnerValue = ((JSpinner) component).getValue();
+                if (spinnerValue instanceof Date) {
+                    value = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format((Date) spinnerValue);
+                }
+            }
+
+            String insertHeatDetailsSQL = "INSERT INTO MES_Heat_Details (ID, HeatName, ParameterID, ParameterName, ParameterValues) VALUES (?, ?, ?, ?, ?)";
+            PreparedStatement pstmtHeatDetails = connection.prepareStatement(insertHeatDetailsSQL);
+            pstmtHeatDetails.setInt(1, heatID);
+            pstmtHeatDetails.setString(2, heatName);
+            pstmtHeatDetails.setInt(3, getParameterID(parameterName));
+            pstmtHeatDetails.setString(4, parameterName);
+            pstmtHeatDetails.setString(5, value);
+            pstmtHeatDetails.executeUpdate();
+        }
+
+        connection.commit();
+        JOptionPane.showMessageDialog(null, "Data inserted successfully!");
+    } catch (SQLException ex) {
+        connection.rollback();
+        ex.printStackTrace();
+        JOptionPane.showMessageDialog(null, "Error: " + ex.getMessage());
+    } finally {
+        connection.setAutoCommit(true);
+    }
+}
+
+
+
+
+
+    private String getExistingSteelGrade(String heatName) throws SQLException {
+        String query = "SELECT ParameterValues FROM MES_Heat_Details WHERE HeatName = ? AND ParameterName = 'SteelGrade'";
+        try (PreparedStatement pstmt = connection.prepareStatement(query)) {
+            pstmt.setString(1, heatName);
+            ResultSet rs = pstmt.executeQuery();
+            if (rs.next()) {
+                return rs.getString("ParameterValues");
+            }
+        }
+        return null;
+    }
+
+    private String getStationNoForRelatedAggregate(Map<String, JComponent> inputFields, String relatedAggregate) {
+        for (String key : inputFields.keySet()) {
+            String[] parts = key.split("\\.");
+            String heading = parts[0];
+            String parameterName = parts[1];
+            if (heading.equals(relatedAggregate) && parameterName.equals("StationNo")) {
+                JComponent component = inputFields.get(key);
+                if (component instanceof JTextField) {
+                    return ((JTextField) component).getText();
+                }
+            }
+        }
+        return null;
+    }
+
+    private String getTimestampForCheckbox(Map<String, Map<String, JCheckBox>> selectedCheckBoxes, Map<String, JComponent> inputFields, String relatedAggregate, String timeType) {
+    // Check if the related aggregate has checkboxes
+    if (selectedCheckBoxes.containsKey(relatedAggregate)) {
+        Map<String, JCheckBox> checkBoxes = selectedCheckBoxes.get(relatedAggregate);
+        
+        // Check if the specific timeType checkbox is present
+        JCheckBox checkBox = checkBoxes.get(timeType);
+        if (checkBox != null && checkBox.isSelected()) {
+            // Get the corresponding time input field
+            JComponent component = inputFields.get(relatedAggregate + "." + timeType);
+            if (component instanceof JSpinner) {
+                Object value = ((JSpinner) component).getValue();
+                if (value instanceof Date) {
+                    // Return the formatted date-time string including date and time
+                    return new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format((Date) value);
+                }
+            }
+        }
+    }
+    // Return null if no value is found
+    return null;
+}
+
+
+    private int getParameterID(String parameterName) throws SQLException {
+        String query = "SELECT ParameterID FROM MES_Parameter WHERE ParameterName = ?";
+        PreparedStatement pstmt = connection.prepareStatement(query);
+        pstmt.setString(1, parameterName);
+        ResultSet rs = pstmt.executeQuery();
+        if (rs.next()) {
+            return rs.getInt("ParameterID");
+        }
+        return -1;
+    }
+
+
+    
+    private void fetchHeatNames(String heatname, Date selectedDate) {
+    // Prepare SQL query
+    StringBuilder query = new StringBuilder("SELECT DISTINCT HeatName FROM MES_Heat WHERE 1=1");
+    Map<Integer, Object> parameters = new HashMap<>();
+    int paramIndex = 1;
+
+    if (!heatname.isEmpty()) {
+        query.append(" AND HeatName = ?");
+        parameters.put(paramIndex++, heatname);
+    }
+
+    if (selectedDate != null) {
+        query.append(" AND DATE(CreationTime) = ?");
+        parameters.put(paramIndex++, new SimpleDateFormat("yyyy-MM-dd").format(selectedDate));
+    }
+
+    System.out.println("SQL Query: " + query.toString());
+    System.out.println("Parameters: " + parameters.toString());
+
+    // Execute SQL query
+    try {
+        PreparedStatement preparedStatement = connection.prepareStatement(query.toString());
+
+        for (Map.Entry<Integer, Object> entry : parameters.entrySet()) {
+            preparedStatement.setObject(entry.getKey(), entry.getValue());
+        }
+
+        ResultSet resultSet = preparedStatement.executeQuery();
+
+        // Clear existing items in JComboBox
+        jComboBox2.removeAllItems();
+
+        // Track added heatnames to avoid duplicates
+        Set<String> heatNamesSet = new HashSet<>();
+
+        // Populate JComboBox with results
+        while (resultSet.next()) {
+            String heatNameResult = resultSet.getString("HeatName");
+            System.out.println("HeatName Result: " + heatNameResult);
+            if (!heatNamesSet.contains(heatNameResult)) {
+                jComboBox2.addItem(heatNameResult);
+                heatNamesSet.add(heatNameResult);
+            }
+        }
+
+        resultSet.close();
+        preparedStatement.close();
+    } catch (SQLException e) {
+        System.err.println("Failed to execute query. Error: " + e.getMessage());
+        e.printStackTrace();
+    }
+}
+
+
+   private void fetchHeatDataByHeatName(String heatName) {
+    try {
+        // Create a new panel to hold all content
+        JPanel contentPanel = new JPanel();
+        contentPanel.setLayout(new BoxLayout(contentPanel, BoxLayout.Y_AXIS));
+
+        // Fetch HeatName details including UpdateTime
+        String heatDetailsQuery = "SELECT HeatName, TreatmentCounter, CreationTime, UpdateTime FROM MES_Heat WHERE HeatName = ?";
+        PreparedStatement heatDetailsStmt = connection.prepareStatement(heatDetailsQuery);
+        heatDetailsStmt.setString(1, heatName);
+        ResultSet heatDetailsRs = heatDetailsStmt.executeQuery();
+
+        if (heatDetailsRs.next()) {
+            String treatmentCounter = heatDetailsRs.getString("TreatmentCounter");
+            Timestamp creationTime = heatDetailsRs.getTimestamp("CreationTime");
+            Timestamp updateTime = heatDetailsRs.getTimestamp("UpdateTime");
+
+            // Display HeatName details including UpdateTime
+            JPanel heatDetailsPanel = new JPanel(new GridLayout(4, 2));
+            heatDetailsPanel.setBorder(BorderFactory.createTitledBorder("Heat Details"));
+            heatDetailsPanel.add(new JLabel("HeatName:"));
+            heatDetailsPanel.add(new JLabel(heatName));
+            heatDetailsPanel.add(new JLabel("TreatmentCounter:"));
+            heatDetailsPanel.add(new JLabel(treatmentCounter));
+            heatDetailsPanel.add(new JLabel("CreationTime:"));
+            heatDetailsPanel.add(new JLabel(creationTime.toString()));
+            heatDetailsPanel.add(new JLabel("UpdateTime:"));
+            heatDetailsPanel.add(new JLabel(updateTime != null ? updateTime.toString() : "Not Updated"));
+
+            contentPanel.add(heatDetailsPanel);
+        } else {
+            // Display a message if no HeatName details are found
+            JPanel noDataPanel = new JPanel();
+            noDataPanel.add(new JLabel("No data found for HeatName: " + heatName));
+            contentPanel.add(noDataPanel);
+        }
+        heatDetailsRs.close();
+        heatDetailsStmt.close();
+
+        // Fetch RelatedAggregate values
+        String aggregatesQuery = "SELECT DISTINCT RelatedAggregate FROM MS_Treatment WHERE HeatName = ?";
+        PreparedStatement aggregatesStmt = connection.prepareStatement(aggregatesQuery);
+        aggregatesStmt.setString(1, heatName);
+        ResultSet aggregatesRs = aggregatesStmt.executeQuery();
+
+        while (aggregatesRs.next()) {
+            String relatedAggregate = aggregatesRs.getString("RelatedAggregate");
+
+            // Create a panel for each RelatedAggregate
+            JPanel aggregatePanel = new JPanel();
+            aggregatePanel.setLayout(new BoxLayout(aggregatePanel, BoxLayout.Y_AXIS));
+            aggregatePanel.setBorder(BorderFactory.createTitledBorder("Related Aggregate: " + relatedAggregate));
+
+            // Fetch data for the RelatedAggregate grouped by TreatmentID
+            String detailsQuery = "SELECT ParameterName, Parametervalues, TreatmentID FROM MS_Treatment_Details "
+                                + "WHERE TreatmentID IN (SELECT TreatmentID FROM MS_Treatment WHERE HeatName = ? AND RelatedAggregate = ?) "
+                                + "ORDER BY TreatmentID";
+            PreparedStatement detailsStmt = connection.prepareStatement(detailsQuery);
+            detailsStmt.setString(1, heatName);
+            detailsStmt.setString(2, relatedAggregate);
+            ResultSet detailsRs = detailsStmt.executeQuery();
+
+            Map<Integer, JPanel> inputsByTreatmentID = new LinkedHashMap<>();
+            while (detailsRs.next()) {
+                String parameterName = detailsRs.getString("ParameterName");
+                String parameterValue = detailsRs.getString("Parametervalues");
+                int treatmentID = detailsRs.getInt("TreatmentID");
+
+                // Use 'TreatmentID' to group inputs
+                if (!inputsByTreatmentID.containsKey(treatmentID)) {
+                    inputsByTreatmentID.put(treatmentID, new JPanel(new GridLayout(0, 2)));
+                }
+                JPanel parametersPanel = inputsByTreatmentID.get(treatmentID);
+                parametersPanel.add(new JLabel(parameterName + ":"));
+                parametersPanel.add(new JLabel(parameterValue));
+            }
+
+            // Add each input set to the aggregatePanel within a JScrollPane
+            int inputSetCounter = 1;
+            for (JPanel parametersPanel : inputsByTreatmentID.values()) {
+                parametersPanel.setBorder(BorderFactory.createTitledBorder("Input Set " + inputSetCounter));
+                JScrollPane inputScrollPane = new JScrollPane(parametersPanel);
+                aggregatePanel.add(inputScrollPane);
+                inputSetCounter++;
+            }
+
+            contentPanel.add(aggregatePanel);
+            detailsRs.close();
+            detailsStmt.close();
+        }
+        aggregatesRs.close();
+        aggregatesStmt.close();
+
+        // Set the content panel as the view of jScrollPane1
+        jScrollPane1.setViewportView(contentPanel);
+
+    } catch (SQLException e) {
+        e.printStackTrace();
+        JOptionPane.showMessageDialog(this, "Error fetching data: " + e.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+    }
+}
+
+   
+
+  private void openUpdateDialog(String heatName) {
+    JDialog updateDialog = new JDialog(this, "Update Heat Data", true);
+    updateDialog.setSize(600, 600);
+    JPanel panel = new JPanel();
+    panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+
+    Map<String, JComponent> inputFields = new HashMap<>();
+    final JTextField[] steelGradeFieldRef = new JTextField[1];
+
+    try {
+        // Fetch current parameter values
+        String query = "SELECT mt.RelatedAggregate, mtd.ParameterName, mtd.Parametervalues, mt.TreatmentID, mt.Counter " +
+                       "FROM MS_Treatment_Details mtd " +
+                       "JOIN MS_Treatment mt ON mtd.TreatmentID = mt.TreatmentID " +
+                       "WHERE mt.HeatName = ? " +
+                       "ORDER BY mt.Counter, mtd.ParameterID";
+        PreparedStatement pstmt = connection.prepareStatement(query);
+        pstmt.setString(1, heatName);
+        ResultSet rs = pstmt.executeQuery();
+
+        String currentAggregate = "";
+        JPanel aggregatePanel = null;
+        int maxCounter = -1;
+
+        while (rs.next()) {
+            String relatedAggregate = rs.getString("RelatedAggregate");
+            String parameterName = rs.getString("ParameterName");
+            String parameterValue = rs.getString("Parametervalues");
+            int treatmentID = rs.getInt("TreatmentID");
+            int counter = rs.getInt("Counter");
+
+            if (!relatedAggregate.equals(currentAggregate)) {
+                currentAggregate = relatedAggregate;
+                aggregatePanel = new JPanel();
+                aggregatePanel.setLayout(new BoxLayout(aggregatePanel, BoxLayout.Y_AXIS));
+                aggregatePanel.setBorder(BorderFactory.createTitledBorder(relatedAggregate));
+                panel.add(aggregatePanel);
+            }
+
+            JPanel paramPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
+            paramPanel.add(new JLabel(parameterName + " (Counter " + counter + "):"));
+
+            JComponent inputField;
+            if (parameterName.equals("StartTime") || parameterName.equals("EndTime")) {
+                JSpinner timeSpinner = new JSpinner(new SpinnerDateModel());
+                JSpinner.DateEditor timeEditor = new JSpinner.DateEditor(timeSpinner, "yyyy-MM-dd HH:mm:ss");
+                timeSpinner.setEditor(timeEditor);
+                try {
+                    timeSpinner.setValue(new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").parse(parameterValue));
+                } catch (ParseException e) {
+                    e.printStackTrace();
+                }
+                inputField = timeSpinner;
+            } else if (parameterName.equals("SteelGrade")) {
+                steelGradeFieldRef[0] = new JTextField(parameterValue, 15);
+                inputField = steelGradeFieldRef[0];
+            } else {
+                inputField = new JTextField(parameterValue, 15);
+            }
+
+            paramPanel.add(inputField);
+            aggregatePanel.add(paramPanel);
+
+            inputFields.put(relatedAggregate + "." + parameterName + "." + counter, inputField);
+            maxCounter = Math.max(maxCounter, counter);
+        }
+
+        final int finalMaxCounter = maxCounter;
+
+        JButton updateButton = new JButton("Update");
+        updateButton.addActionListener(e -> {
+            updateHeatData(heatName, inputFields, finalMaxCounter);
+            updateDialog.dispose();
+            fetchHeatDataByHeatName(heatName); // Refresh the display
+        });
+        panel.add(updateButton);
+
+        JScrollPane scrollPane = new JScrollPane(panel);
+        updateDialog.add(scrollPane);
+        updateDialog.setVisible(true);
+
+    } catch (SQLException e) {
+        e.printStackTrace();
+        JOptionPane.showMessageDialog(this, "Error fetching data for update: " + e.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+    }
+}
+
+private void updateHeatData(String heatName, Map<String, JComponent> inputFields, int maxCounter) {
+    try {
+        connection.setAutoCommit(false);
+
+        // Track SteelGrade values entered by the user
+        Set<String> steelGradeValues = new HashSet<>();
+        String steelGrade = null;
+        Timestamp firstStartTime = null;
+        Timestamp lastStartTime = null;
+
+        // Update parameter values in MS_Treatment_Details and MES_Heat_Details tables
+        for (Map.Entry<String, JComponent> entry : inputFields.entrySet()) {
+            String[] parts = entry.getKey().split("\\.");
+            String relatedAggregate = parts[0];
+            String parameterName = parts[1];
+            int counter = Integer.parseInt(parts[2]);
+
+            String newValue;
+            if (entry.getValue() instanceof JSpinner) {
+                Date date = (Date) ((JSpinner) entry.getValue()).getValue();
+                newValue = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(date);
+            } else {
+                newValue = ((JTextField) entry.getValue()).getText();
+            }
+
+            // Track SteelGrade values for validation
+            if (parameterName.equals("SteelGrade")) {
+                steelGradeValues.add(newValue);
+            }
+
+            // Update MS_Treatment_Details
+            String updateTreatmentDetailsSQL = "UPDATE MS_Treatment_Details mtd " +
+                                               "JOIN MS_Treatment mt ON mtd.TreatmentID = mt.TreatmentID " +
+                                               "SET mtd.Parametervalues = ? " +
+                                               "WHERE mt.HeatName = ? AND mt.Counter = ? AND mtd.ParameterName = ?";
+            PreparedStatement pstmtTreatmentDetails = connection.prepareStatement(updateTreatmentDetailsSQL);
+            pstmtTreatmentDetails.setString(1, newValue);
+            pstmtTreatmentDetails.setString(2, heatName);
+            pstmtTreatmentDetails.setInt(3, counter);
+            pstmtTreatmentDetails.setString(4, parameterName);
+            pstmtTreatmentDetails.executeUpdate();
+
+            // Update MES_Heat_Details
+            String updateHeatDetailsSQL = "UPDATE MES_Heat_Details SET ParameterValues = ? " +
+                                          "WHERE HeatName = ? AND ParameterName = ?";
+            PreparedStatement pstmtHeatDetails = connection.prepareStatement(updateHeatDetailsSQL);
+            pstmtHeatDetails.setString(1, newValue);
+            pstmtHeatDetails.setString(2, heatName);
+            pstmtHeatDetails.setString(3, parameterName);
+            pstmtHeatDetails.executeUpdate();
+
+            // Update MS_Treatment for StartTime and EndTime
+            if (parameterName.equals("StartTime") || parameterName.equals("EndTime")) {
+                String updateTreatmentSQL = "UPDATE MS_Treatment SET " + parameterName + " = ? " +
+                                            "WHERE HeatName = ? AND Counter = ?";
+                PreparedStatement pstmtTreatment = connection.prepareStatement(updateTreatmentSQL);
+                pstmtTreatment.setString(1, newValue);
+                pstmtTreatment.setString(2, heatName);
+                pstmtTreatment.setInt(3, counter);
+                pstmtTreatment.executeUpdate();
+
+                if (parameterName.equals("StartTime")) {
+                    Timestamp startTime = Timestamp.valueOf(newValue);
+                    if (counter == 1) {
+                        firstStartTime = startTime;
+                    }
+                    if (counter == maxCounter) {
+                        lastStartTime = startTime;
+                    }
+                }
+            }
+
+            if (parameterName.equals("SteelGrade")) {
+                steelGrade = newValue;
+            }
+        }
+
+        // Ensure all SteelGrade values are the same
+        if (steelGradeValues.size() > 1) {
+            connection.rollback();
+            JOptionPane.showMessageDialog(this, "Please update using the same SteelGrade for all RelatedAggregates.", "Error", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+
+        // Update MES_Heat
+        String updateHeatSQL = "UPDATE MES_Heat SET UpdateTime = ?, CreationTime = ? WHERE HeatName = ?";
+        PreparedStatement pstmtHeat = connection.prepareStatement(updateHeatSQL);
+        pstmtHeat.setTimestamp(1, lastStartTime);
+        pstmtHeat.setTimestamp(2, firstStartTime);
+        pstmtHeat.setString(3, heatName);
+        pstmtHeat.executeUpdate();
+
+        // Update SteelGrade in MS_Treatment_Details for all RelatedAggregates if changed
+        if (steelGrade != null) {
+            String updateSteelGradeSQL = "UPDATE MS_Treatment_Details mtd " +
+                                         "JOIN MS_Treatment mt ON mtd.TreatmentID = mt.TreatmentID " +
+                                         "SET mtd.Parametervalues = ? " +
+                                         "WHERE mt.HeatName = ? AND mtd.ParameterName = 'SteelGrade'";
+            PreparedStatement pstmtSteelGrade = connection.prepareStatement(updateSteelGradeSQL);
+            pstmtSteelGrade.setString(1, steelGrade);
+            pstmtSteelGrade.setString(2, heatName);
+            pstmtSteelGrade.executeUpdate();
+        }
+
+        connection.commit();
+        JOptionPane.showMessageDialog(this, "Heat data updated successfully!", "Success", JOptionPane.INFORMATION_MESSAGE);
+
+    } catch (SQLException e) {
+        try {
+            connection.rollback();
+        } catch (SQLException ex) {
+            ex.printStackTrace();
+        }
+        e.printStackTrace();
+        JOptionPane.showMessageDialog(this, "Error updating heat data: " + e.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+    } finally {
+        try {
+            connection.setAutoCommit(true);
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+    }
+}
+
+ 
+
+   
+   
+   
+   
+   
+   
+   
+   
+   
+   
+
+
+private void deleteRecord() {
+    JPasswordField passwordField = new JPasswordField();
+    int option = JOptionPane.showConfirmDialog(this, passwordField, "Enter HeatID to delete:", JOptionPane.OK_CANCEL_OPTION, JOptionPane.QUESTION_MESSAGE);
+    
+    if (option == JOptionPane.OK_OPTION) {
+        String heatIDStr = new String(passwordField.getPassword());
+        
+        try {
+            int heatID = Integer.parseInt(heatIDStr);
+            String heatName = getHeatNameById(heatID);
+
+            if (heatName != null) {
+                String enteredHeatName = JOptionPane.showInputDialog(this, "Enter HeatName corresponding to HeatID:", "Verify HeatName", JOptionPane.QUESTION_MESSAGE);
+                
+                if (enteredHeatName != null && enteredHeatName.equals(heatName)) {
+                    int confirm = JOptionPane.showConfirmDialog(this, "Are you sure you want to delete the record for '" + heatName + "'?", "Confirm Deletion", JOptionPane.YES_NO_OPTION);
+                    if (confirm == JOptionPane.YES_OPTION) {
+                        boolean isDeleted = deleteHeatRecord(heatID);
+                        if (isDeleted) {
+                            JOptionPane.showMessageDialog(this, "Data successfully deleted.");
+                        } else {
+                            JOptionPane.showMessageDialog(this, "An error occurred while deleting data.");
+                        }
+                    }
+                } else {
+                    JOptionPane.showMessageDialog(this, "Wrong HeatName. Please contact admin.");
+                }
+            } else {
+                JOptionPane.showMessageDialog(this, "Wrong HeatID. Please contact admin.");
+            }
+        } catch (NumberFormatException e) {
+            JOptionPane.showMessageDialog(this, "Invalid HeatID format.");
+        }
+    }
+}
+
+
+
+private String getHeatNameById(int heatID) {
+    String heatName = null;
+    // Use your existing database connection
+    try (PreparedStatement ps = connection.prepareStatement("SELECT HeatName FROM MES_Heat WHERE HeatID = ?")) {
+        ps.setInt(1, heatID);
+        try (ResultSet rs = ps.executeQuery()) {
+            if (rs.next()) {
+                heatName = rs.getString("HeatName");
+            }
+        }
+    } catch (SQLException e) {
+        e.printStackTrace();
+    }
+    return heatName;
+}
+
+private boolean deleteHeatRecord(int heatID) {
+    boolean success = false;
+    try {
+        connection.setAutoCommit(false); // Start transaction
+
+        // Fetch the HeatName for the given HeatID
+        String heatName = null;
+        try (PreparedStatement ps = connection.prepareStatement("SELECT HeatName FROM MES_Heat WHERE HeatID = ?")) {
+            ps.setInt(1, heatID);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    heatName = rs.getString("HeatName");
+                }
+            }
+        }
+
+        if (heatName != null) {
+            // Delete from MS_Treatment_Details
+            try (PreparedStatement ps = connection.prepareStatement(
+                    "DELETE FROM MS_Treatment_Details WHERE TreatmentID IN (SELECT TreatmentID FROM MS_Treatment WHERE HeatName = ?)")) {
+                ps.setString(1, heatName);
+                ps.executeUpdate();
+            }
+
+            // Delete from MS_Treatment
+            try (PreparedStatement ps = connection.prepareStatement("DELETE FROM MS_Treatment WHERE HeatName = ?")) {
+                ps.setString(1, heatName);
+                ps.executeUpdate();
+            }
+
+            // Delete from MES_Heat_Details
+            try (PreparedStatement ps = connection.prepareStatement("DELETE FROM MES_Heat_Details WHERE HeatName = ?")) {
+                ps.setString(1, heatName);
+                ps.executeUpdate();
+            }
+
+            // Delete from MES_Heat
+            try (PreparedStatement ps = connection.prepareStatement("DELETE FROM MES_Heat WHERE HeatID = ?")) {
+                ps.setInt(1, heatID);
+                ps.executeUpdate();
+            }
+
+            connection.commit(); // Commit the transaction
+            success = true;
+        }
+    } catch (SQLException e) {
+        try {
+            connection.rollback(); // Rollback transaction on error
+        } catch (SQLException rollbackEx) {
+            rollbackEx.printStackTrace();
+        }
+        e.printStackTrace();
+    } finally {
+        try {
+            connection.setAutoCommit(true); // Reset auto-commit
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+    }
+    return success;
+}
+
+  
+
+
+
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+   
+    
+    
+    
+
+    /**
+     * This method is called from within the constructor to initialize the form.
+     * WARNING: Do NOT modify this code. The content of this method is always
+     * regenerated by the Form Editor.
+     */
+    @SuppressWarnings("unchecked")
+    // <editor-fold defaultstate="collapsed" desc="Generated Code">                          
+    private void initComponents() {
+
+        jPanel1 = new javax.swing.JPanel();
+        jComboBox1 = new javax.swing.JComboBox<>();
+        jButton1 = new javax.swing.JButton();
+        jLabel1 = new javax.swing.JLabel();
+        jLabel2 = new javax.swing.JLabel();
+        jLabel3 = new javax.swing.JLabel();
+        jTextField1 = new javax.swing.JTextField();
+        jLabel4 = new javax.swing.JLabel();
+        jDateChooser1 = new com.toedter.calendar.JDateChooser();
+        jComboBox2 = new javax.swing.JComboBox<>();
+        jButton2 = new javax.swing.JButton();
+        jButton3 = new javax.swing.JButton();
+        jScrollPane1 = new javax.swing.JScrollPane();
+        jButton4 = new javax.swing.JButton();
+        jLabel5 = new javax.swing.JLabel();
+        jButton5 = new javax.swing.JButton();
+        jLabel6 = new javax.swing.JLabel();
+
+        setDefaultCloseOperation(javax.swing.WindowConstants.EXIT_ON_CLOSE);
+
+        jPanel1.setBackground(new java.awt.Color(51, 51, 51));
+
+        jComboBox1.setModel(new javax.swing.DefaultComboBoxModel<>(new String[] { "Select Option", "Heat" }));
+
+        jButton1.setText("SELECT PARAMETERS");
+        jButton1.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                jButton1ActionPerformed(evt);
+            }
+        });
+
+        jLabel1.setForeground(new java.awt.Color(255, 255, 255));
+        jLabel1.setText("CREATE FOR HEAT:");
+
+        jLabel2.setForeground(new java.awt.Color(255, 255, 255));
+        jLabel2.setText("READ FOR HEAT:");
+
+        jLabel3.setForeground(new java.awt.Color(255, 255, 255));
+        jLabel3.setText("SEARCH BY HEATNAME:");
+
+        jLabel4.setForeground(new java.awt.Color(255, 255, 255));
+        jLabel4.setText("SEARCH BY DATE:");
+
+        jComboBox2.setModel(new javax.swing.DefaultComboBoxModel<>(new String[] { "Item 1", "Item 2", "Item 3", "Item 4" }));
+
+        jButton2.setText("SUBMIT");
+        jButton2.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                jButton2ActionPerformed(evt);
+            }
+        });
+
+        jButton3.setText("FETCH");
+        jButton3.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                jButton3ActionPerformed(evt);
+            }
+        });
+
+        jButton4.setText("UPDATE");
+        jButton4.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                jButton4ActionPerformed(evt);
+            }
+        });
+
+        jLabel5.setForeground(new java.awt.Color(255, 255, 255));
+        jLabel5.setText("UPDATE FOR HEAT:");
+
+        jButton5.setText("DELETE");
+        jButton5.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                jButton5ActionPerformed(evt);
+            }
+        });
+
+        jLabel6.setForeground(new java.awt.Color(255, 255, 255));
+        jLabel6.setText("DELETE FOR HEAT:");
+
+        javax.swing.GroupLayout jPanel1Layout = new javax.swing.GroupLayout(jPanel1);
+        jPanel1.setLayout(jPanel1Layout);
+        jPanel1Layout.setHorizontalGroup(
+            jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+            .addGroup(jPanel1Layout.createSequentialGroup()
+                .addGap(50, 50, 50)
+                .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                    .addGroup(jPanel1Layout.createSequentialGroup()
+                        .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                            .addComponent(jLabel1, javax.swing.GroupLayout.PREFERRED_SIZE, 184, javax.swing.GroupLayout.PREFERRED_SIZE)
+                            .addComponent(jComboBox1, javax.swing.GroupLayout.PREFERRED_SIZE, 216, javax.swing.GroupLayout.PREFERRED_SIZE)
+                            .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.TRAILING)
+                                .addComponent(jButton2)
+                                .addGroup(jPanel1Layout.createSequentialGroup()
+                                    .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                                        .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.TRAILING, false)
+                                            .addComponent(jLabel3, javax.swing.GroupLayout.Alignment.LEADING, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
+                                            .addComponent(jLabel2, javax.swing.GroupLayout.Alignment.LEADING, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
+                                            .addComponent(jButton1, javax.swing.GroupLayout.Alignment.LEADING, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE))
+                                        .addComponent(jLabel4, javax.swing.GroupLayout.PREFERRED_SIZE, 132, javax.swing.GroupLayout.PREFERRED_SIZE))
+                                    .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.UNRELATED)
+                                    .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING, false)
+                                        .addComponent(jTextField1)
+                                        .addComponent(jDateChooser1, javax.swing.GroupLayout.DEFAULT_SIZE, 144, Short.MAX_VALUE)))
+                                .addComponent(jComboBox2, javax.swing.GroupLayout.PREFERRED_SIZE, 144, javax.swing.GroupLayout.PREFERRED_SIZE)
+                                .addComponent(jButton3)))
+                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE))
+                    .addGroup(javax.swing.GroupLayout.Alignment.TRAILING, jPanel1Layout.createSequentialGroup()
+                        .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.TRAILING)
+                            .addGroup(jPanel1Layout.createSequentialGroup()
+                                .addComponent(jLabel6, javax.swing.GroupLayout.PREFERRED_SIZE, 116, javax.swing.GroupLayout.PREFERRED_SIZE)
+                                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
+                                .addComponent(jButton5))
+                            .addGroup(jPanel1Layout.createSequentialGroup()
+                                .addComponent(jLabel5, javax.swing.GroupLayout.DEFAULT_SIZE, 150, Short.MAX_VALUE)
+                                .addGap(18, 18, 18)
+                                .addComponent(jButton4)))
+                        .addGap(129, 129, 129)))
+                .addComponent(jScrollPane1, javax.swing.GroupLayout.PREFERRED_SIZE, 343, javax.swing.GroupLayout.PREFERRED_SIZE)
+                .addGap(24, 24, 24))
+        );
+        jPanel1Layout.setVerticalGroup(
+            jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+            .addGroup(javax.swing.GroupLayout.Alignment.TRAILING, jPanel1Layout.createSequentialGroup()
+                .addGap(26, 26, 26)
+                .addComponent(jScrollPane1, javax.swing.GroupLayout.PREFERRED_SIZE, 493, javax.swing.GroupLayout.PREFERRED_SIZE)
+                .addGap(0, 41, Short.MAX_VALUE))
+            .addGroup(jPanel1Layout.createSequentialGroup()
+                .addGap(17, 17, 17)
+                .addComponent(jLabel1, javax.swing.GroupLayout.PREFERRED_SIZE, 22, javax.swing.GroupLayout.PREFERRED_SIZE)
+                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.UNRELATED)
+                .addComponent(jComboBox1, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
+                .addGap(18, 18, 18)
+                .addComponent(jButton1)
+                .addGap(27, 27, 27)
+                .addComponent(jLabel2)
+                .addGap(18, 18, 18)
+                .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
+                    .addComponent(jLabel3)
+                    .addComponent(jTextField1, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE))
+                .addGap(26, 26, 26)
+                .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                    .addGroup(jPanel1Layout.createSequentialGroup()
+                        .addComponent(jLabel4, javax.swing.GroupLayout.PREFERRED_SIZE, 26, javax.swing.GroupLayout.PREFERRED_SIZE)
+                        .addGap(18, 18, 18)
+                        .addComponent(jButton2)
+                        .addGap(18, 18, 18)
+                        .addComponent(jComboBox2, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
+                        .addGap(18, 18, 18)
+                        .addComponent(jButton3))
+                    .addComponent(jDateChooser1, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE))
+                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
+                .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
+                    .addComponent(jButton4)
+                    .addComponent(jLabel5, javax.swing.GroupLayout.PREFERRED_SIZE, 30, javax.swing.GroupLayout.PREFERRED_SIZE))
+                .addGap(26, 26, 26)
+                .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
+                    .addComponent(jButton5)
+                    .addComponent(jLabel6, javax.swing.GroupLayout.PREFERRED_SIZE, 23, javax.swing.GroupLayout.PREFERRED_SIZE))
+                .addGap(62, 62, 62))
+        );
+
+        javax.swing.GroupLayout layout = new javax.swing.GroupLayout(getContentPane());
+        getContentPane().setLayout(layout);
+        layout.setHorizontalGroup(
+            layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+            .addGroup(layout.createSequentialGroup()
+                .addGap(6, 6, 6)
+                .addComponent(jPanel1, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE))
+        );
+        layout.setVerticalGroup(
+            layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+            .addGroup(layout.createSequentialGroup()
+                .addGap(6, 6, 6)
+                .addComponent(jPanel1, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE))
+        );
+
+        pack();
+    }// </editor-fold>                        
+
+    private void jButton1ActionPerformed(java.awt.event.ActionEvent evt) {                                         
+         String selectedOption = jComboBox1.getSelectedItem().toString();
+        if (!selectedOption.equals("Select Option")) {
+            openParameterSelectionScreen(selectedOption);
+        }
+    }                                        
+
+    private void jButton2ActionPerformed(java.awt.event.ActionEvent evt) {                                         
+    String heatname = jTextField1.getText().trim();
+    Date selectedDate = jDateChooser1.getDate();
+
+    // Call the separate method
+    fetchHeatNames(heatname, selectedDate);
+    }                                        
+
+    private void jButton3ActionPerformed(java.awt.event.ActionEvent evt) {                                         
+    // Determine if the fetch should be based on JTextField or JComboBox
+    String heatName = jTextField1.getText().trim();
+    String selectedHeatNameFromDropdown = (String) jComboBox2.getSelectedItem();
+    
+    // Check if a HeatName is entered or selected
+    if (!heatName.isEmpty()) {
+        // Fetch based on entered HeatName
+        fetchHeatDataByHeatName(heatName);
+    } else if (selectedHeatNameFromDropdown != null && !selectedHeatNameFromDropdown.isEmpty()) {
+        // Fetch based on selected HeatName from dropdown
+        fetchHeatDataByHeatName(selectedHeatNameFromDropdown);
+    } else {
+        JOptionPane.showMessageDialog(this, "Please enter a HeatName or select one from the dropdown.", "Error", JOptionPane.ERROR_MESSAGE);
+    }
+    }                                        
+
+    private void jButton4ActionPerformed(java.awt.event.ActionEvent evt) {                                         
+     // TODO add your handling code here:
+         String heatName = jTextField1.getText().trim();
+    if (heatName.isEmpty()) {
+        heatName = (String) jComboBox2.getSelectedItem();
+    }
+    if (heatName != null && !heatName.isEmpty()) {
+        openUpdateDialog(heatName);
+    } else {
+        JOptionPane.showMessageDialog(this, "Please select a heat to update.", "Error", JOptionPane.ERROR_MESSAGE);
+    }
+    }                                        
+
+    private void jButton5ActionPerformed(java.awt.event.ActionEvent evt) {                                         
+        deleteRecord();
+    }                                        
+
+    /**
+     * @param args the command line arguments
+     */
+    public static void main(String args[]) {
+        /* Set the Nimbus look and feel */
+        //<editor-fold defaultstate="collapsed" desc=" Look and feel setting code (optional) ">
+        /* If Nimbus (introduced in Java SE 6) is not available, stay with the default look and feel.
+         * For details see http://download.oracle.com/javase/tutorial/uiswing/lookandfeel/plaf.html 
+         */
+        try {
+            for (javax.swing.UIManager.LookAndFeelInfo info : javax.swing.UIManager.getInstalledLookAndFeels()) {
+                if ("Nimbus".equals(info.getName())) {
+                    javax.swing.UIManager.setLookAndFeel(info.getClassName());
+                    break;
+                }
+            }
+        } catch (ClassNotFoundException ex) {
+            java.util.logging.Logger.getLogger(HeatScreen.class.getName()).log(java.util.logging.Level.SEVERE, null, ex);
+        } catch (InstantiationException ex) {
+            java.util.logging.Logger.getLogger(HeatScreen.class.getName()).log(java.util.logging.Level.SEVERE, null, ex);
+        } catch (IllegalAccessException ex) {
+            java.util.logging.Logger.getLogger(HeatScreen.class.getName()).log(java.util.logging.Level.SEVERE, null, ex);
+        } catch (javax.swing.UnsupportedLookAndFeelException ex) {
+            java.util.logging.Logger.getLogger(HeatScreen.class.getName()).log(java.util.logging.Level.SEVERE, null, ex);
+        }
+        //</editor-fold>
+
+        /* Create and display the form */
+        java.awt.EventQueue.invokeLater(new Runnable() {
+            public void run() {
+                new HeatScreen().setVisible(true);
+            }
+        });
+    }
+
+    // Variables declaration - do not modify                     
+    private javax.swing.JButton jButton1;
+    private javax.swing.JButton jButton2;
+    private javax.swing.JButton jButton3;
+    private javax.swing.JButton jButton4;
+    private javax.swing.JButton jButton5;
+    private javax.swing.JComboBox<String> jComboBox1;
+    private javax.swing.JComboBox<String> jComboBox2;
+    private com.toedter.calendar.JDateChooser jDateChooser1;
+    private javax.swing.JLabel jLabel1;
+    private javax.swing.JLabel jLabel2;
+    private javax.swing.JLabel jLabel3;
+    private javax.swing.JLabel jLabel4;
+    private javax.swing.JLabel jLabel5;
+    private javax.swing.JLabel jLabel6;
+    private javax.swing.JPanel jPanel1;
+    private javax.swing.JScrollPane jScrollPane1;
+    private javax.swing.JTextField jTextField1;
+    // End of variables declaration                   
+}
